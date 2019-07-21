@@ -1,0 +1,64 @@
+from flask import Flask
+import socketio
+import eventlet
+from keras.models import load_model
+from io import BytesIO
+from PIL import Image
+import numpy as np
+import cv2
+import base64
+
+
+sio = socketio.Server()
+app = Flask(__name__)  #instance of flask object
+
+
+speed_limit=10
+
+
+#@app.route('/home')  # route decorator when we go to localhost8000/home say() will be called
+#def say():
+#    return 'Hello'
+
+
+def image_preprocessing(img):
+  img=img[60:135,:,:]
+  img = cv2.cvtColor(img,cv2.COLOR_RGB2YUV)
+  img = cv2.GaussianBlur(img,(3,3),0)
+  img = cv2.resize(img,(200,66))
+  img = img/255
+  return img
+
+
+
+#the client continuously sends data to the telementry
+@sio.on('telemetry')
+def telemetry(sid,data):
+    speed = float(data['speed'])
+    throttle=1.0 - speed/speed_limit
+    image=Image.open(BytesIO(base64.b64decode(data['image'])))
+    image=np.asarray(image)
+    image=image_preprocessing(image)
+    image=np.array([image])
+    steering_angle=float(model.predict(image))
+    send_control(steering_angle,1.0)
+
+
+@sio.on('connect')
+def connected(sid,environ):
+    print("connected")
+    send_control(0,0)
+
+#send steering values to the udacity simulator
+def send_control(steering_angle,throttle):
+    sio.emit('steer',data={
+    'steering_angle':steering_angle.__str__(),
+    'throttle':throttle.__str__()
+    })
+
+
+
+if __name__ == '__main__':
+    model=load_model('model.h5')
+    app = socketio.Middleware(sio, app)
+    eventlet.wsgi.server(eventlet.listen(('', 4567)), app) #4567 is the port userd by udacity simulator
